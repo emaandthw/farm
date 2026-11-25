@@ -20,6 +20,54 @@ if not LP.Character then LP.CharacterAdded:Wait() end
 local RS = game:GetService("ReplicatedStorage")
 local TP = game:GetService("TeleportService")
 local UIS = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+
+local KICK_KEYWORDS = { "kicked", "kick", "removed from", "disconnected" }
+
+local function isKickMessage(text)
+    text = string.lower(text or "")
+    for _, kw in ipairs(KICK_KEYWORDS) do
+        if string.find(text, kw) then return true end
+    end
+    return false
+end
+
+local function rejoin()
+    local ok = pcall(function()
+        TP:TeleportToPlaceInstance(game.PlaceId, game.JobId, LP)
+    end)
+    if not ok then
+        TP:Teleport(game.PlaceId, LP)
+    end
+end
+
+local function CheckKick(prompt)
+    if prompt.Name ~= "ErrorPrompt" then return end
+
+    local title = prompt.TitleFrame.ErrorTitle.Text
+    local message = prompt.MessageArea.ErrorFrame.ErrorMessage.Text
+
+    if title == "Teleport Failed" then
+        task.wait(2)
+        TP:TeleportReconnect()
+        return
+    end
+
+    if string.find(message, "Unable to join game") then
+        task.wait(2)
+        TP:TeleportReconnect()
+        return
+    end
+
+    if isKickMessage(message) or isKickMessage(title) then
+        task.wait(2)
+        rejoin()
+    end
+end
+
+pcall(function()
+    CoreGui.RobloxPromptGui.promptOverlay.ChildAdded:Connect(CheckKick)
+end)
 
 local function setupStatusUI()
     local parent = pcall(gethui) and gethui() or game:GetService("CoreGui") or LP:WaitForChild("PlayerGui")
