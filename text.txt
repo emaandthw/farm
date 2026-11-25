@@ -1,0 +1,181 @@
+local v1 = game:GetService("Players").LocalPlayer
+local v2 = game:GetService("TeleportService")
+local v3 = game:GetService("CoreGui")
+
+local function v4()
+    v2:Teleport(game.PlaceId, v1)
+end
+
+local function v5(v6)
+    if v6.Name ~= "ErrorPrompt" then return end
+
+    local v7, v8, v9 = pcall(function()
+        return v6.TitleFrame.ErrorTitle.Text,
+            v6.MessageArea.ErrorFrame.ErrorMessage.Text
+    end)
+    if not v7 then return end
+
+    if v8 == "Teleport Failed" then
+        task.wait(2)
+        v4()
+    elseif string.find(v9, "Unable to join game") or string.find(v9, "Disconnected") then
+        task.wait(2)
+        v4()
+    end
+end
+
+pcall(function()
+    v3.RobloxPromptGui.promptOverlay.ChildAdded:Connect(v5)
+end)
+
+local function v10()
+    local v11, v12 = pcall(function()
+        return v1.PlayerGui["[WGC Integration] FTUE"].Frame.Frame.Border["@CONTENT"]["@COUNT"].Text
+    end)
+    if not v11 then return end
+    local v13, v14 = v12:match("(%d+)%s*/%s*(%d+)")
+    return tonumber(v13), tonumber(v14)
+end
+
+local function v15()
+    local v16, v17 = pcall(function()
+        return v1.PlayerGui["Gold Hunters HUD (example)"]["WGC Info Button Slot"]["[WGC Integration] FTUE Button"].BUTTON
+    end)
+    if v16 and v17:IsA("ImageButton") then
+        for _, v18 in ipairs(getconnections(v17.Activated)) do v18:Fire() end
+        task.wait(0.5)
+    end
+end
+
+local function v19()
+    local v20, v21 = v10()
+    if not v20 then
+        v15()
+        v20, v21 = v10()
+    end
+    return v20, v21
+end
+
+local function v22()
+    local v23, v24 = v19()
+    return v23 ~= nil and v23 >= v24
+end
+
+local function v25()
+    v2:Teleport(107175140535005)
+end
+
+local function v26()
+    local v27 = tonumber(_G.FarmPlaceId)
+    if not v27 then
+        warn("_G.FarmPlaceId is not set")
+        return
+    end
+    v2:Teleport(v27)
+end
+
+local function v28(v29)
+    local v30 = v1.Character or v1.CharacterAdded:Wait()
+    v30:PivotTo(v29)
+end
+
+local function v31(v32)
+    local v33, v34 = pcall(function()
+        local v35 = v1.PlayerGui.HUD.GoldCounters[v32].Counter
+        local v36 = v35:IsA("ValueBase") and v35.Value or v35.Text
+        return tonumber((tostring(v36):gsub("[^%d]", ""))) or 0
+    end)
+    return v33 and v34 or 0
+end
+
+local function v37()
+    local v38 = workspace:WaitForChild("Interactable")
+        :WaitForChild("Smelter")
+        :WaitForChild("Attachment")
+        :WaitForChild("@PROMPT")
+    v38.MaxActivationDistance = math.huge
+    v38.RequiresLineOfSight = false
+
+    local v39 = v31("GoldOreCounter")
+    local v40 = v31("GoldBarCounter")
+
+    if v39 <= 0 then return v26() end
+
+    local v41 = os.clock() + 15
+    repeat
+        fireproximityprompt(v38)
+        task.wait(0.2)
+    until v31("GoldOreCounter") < v39 or os.clock() >= v41
+
+    v41 = os.clock() + 15
+    repeat
+        task.wait(0.2)
+    until v31("GoldBarCounter") > v40 or os.clock() >= v41
+
+    if v31("GoldBarCounter") > v40 then
+        v26()
+    end
+end
+
+local function v42()
+    local v43 = v1.Character and v1.Character:FindFirstChild("HumanoidRootPart")
+    if not v43 then return end
+    local v44, v45
+    for _, v46 in ipairs(workspace:GetDescendants()) do
+        if v46:IsA("ProximityPrompt") and v46.ActionText == "Scan for Gold Ore" and v46.Enabled then
+            local v47 = v46.Parent
+            local v48 = v47:IsA("Attachment") and v47.WorldPosition or v47:IsA("BasePart") and v47.Position
+            local v49 = v48 and (v48 - v43.Position).Magnitude
+            if v49 and (not v45 or v49 < v45) then v44, v45 = v46, v49 end
+        end
+    end
+    return v44
+end
+
+local function v50()
+    v15()
+    if v22() then return v25() end
+
+    local v51 = v42()
+    if not v51 then return end
+
+    local v52 = {}
+    local v53 = workspace.DescendantAdded:Connect(function(v54)
+        if v54:IsA("Model") and v54.Name == "Location Beam" then
+            table.insert(v52, v54:GetPivot())
+        end
+    end)
+    fireproximityprompt(v51)
+    task.wait(1)
+    v53:Disconnect()
+
+    local v55 = true
+    task.spawn(function()
+        while v55 and task.wait(0.1) do
+            local v56 = workspace:FindFirstChild("Dig Spot")
+            local v57 = v56 and v56:FindFirstChild("ProximityPrompt", true)
+            if v57 then fireproximityprompt(v57) end
+        end
+    end)
+
+    for _, v58 in ipairs(v52) do
+        if v22() then break end
+
+        local v59 = v10() or 0
+        v28(v58)
+
+        local v60 = os.clock() + 5
+        repeat
+            task.wait(0.1)
+        until (v10() or 0) > v59 or os.clock() >= v60
+    end
+
+    v55 = false
+    if v22() then v25() end
+end
+
+if game.PlaceId == 107175140535005 then
+    v37()
+else
+    v50()
+end
