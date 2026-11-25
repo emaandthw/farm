@@ -111,42 +111,51 @@ end
 
 local function readGold(name)
     local ok, val = pcall(function()
-        local c = LP.PlayerGui.HUD.GoldCounters[name].Counter
-        return tonumber((tostring(c:IsA("ValueBase") and c.Value or c.Text):gsub("%D", "")))
+        local hud = LP.PlayerGui:WaitForChild("HUD", 20)
+        local gc = hud:WaitForChild("GoldCounters", 20)
+        local c = gc:WaitForChild(name, 20):WaitForChild("Counter", 20)
+        return tonumber((tostring(c:IsA("ValueBase") and c.Value or c.Text):match("%-?%d+")))
     end)
-    return (ok and val) and math.max(0, val) or 0
+    return (ok and val) and val or 0
 end
 
 local function smelt()
-    updateStatus("Island | Tim kiem lo nau quang...", Color3.fromRGB(240, 180, 50))
+    updateStatus("Island | Cho tai du lieu HUD...", Color3.fromRGB(240, 180, 50))
+    local hud = LP.PlayerGui:WaitForChild("HUD", 30)
+    local gc = hud and hud:WaitForChild("GoldCounters", 30)
+    if not gc then return goTo(_G.FarmPlaceId) end
+
     local smelter = workspace:WaitForChild("Interactable", 30):WaitForChild("Smelter", 30):WaitForChild("Attachment", 30)
     local prompt = smelter:WaitForChild("@PROMPT", 30)
     prompt.MaxActivationDistance = math.huge
     prompt.RequiresLineOfSight = false
 
+    task.wait(1.5)
     local ore0 = readGold("GoldOreCounter")
     local bar0 = readGold("GoldBarCounter")
 
     if ore0 <= 0 then
         updateStatus("Island | Khong co quang, quay ve bãi farm...", Color3.fromRGB(255, 100, 100))
+        task.wait(1)
         return goTo(_G.FarmPlaceId)
     end
 
     local t0 = os.clock()
     repeat
         fireproximityprompt(prompt)
-        updateStatus(string.format("Island | Cho quang vao lo... (Con %d ore)", readGold("GoldOreCounter")), Color3.fromRGB(255, 140, 50))
-        task.wait(0.3)
-    until readGold("GoldOreCounter") <= 0 or os.clock() - t0 > 20
+        local curOre = readGold("GoldOreCounter")
+        updateStatus(string.format("Island | Cho quang vao lo... (Con %d ore)", curOre), Color3.fromRGB(255, 140, 50))
+        task.wait(0.8)
+    until readGold("GoldOreCounter") <= 0 or os.clock() - t0 > 25
 
     updateStatus(string.format("Island | Dang nau thoi vang... (Hien co: %d)", bar0), Color3.fromRGB(255, 200, 50))
     t0 = os.clock()
     repeat
         task.wait(0.5)
-    until readGold("GoldBarCounter") > bar0 or os.clock() - t0 > 25
+    until readGold("GoldBarCounter") > bar0 or os.clock() - t0 > 30
 
     updateStatus(string.format("Island | Nau xong (+%d thoi)! Ve Farm...", math.max(0, readGold("GoldBarCounter") - bar0)), Color3.fromRGB(60, 220, 100))
-    task.wait(1)
+    task.wait(2)
     goTo(_G.FarmPlaceId)
 end
 
@@ -287,7 +296,7 @@ local function farm()
     end
 
     updateStatus("Farm | Day kho! Chuan bi sang Island nau vang...", Color3.fromRGB(255, 100, 220))
-    task.wait(1)
+    task.wait(2)
     goTo(ISLAND)
 end
 
