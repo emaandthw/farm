@@ -1,181 +1,298 @@
-local v1 = game:GetService("Players").LocalPlayer
-local v2 = game:GetService("TeleportService")
-local v3 = game:GetService("CoreGui")
 
-local function v4()
-    v2:Teleport(game.PlaceId, v1)
-end
+local ISLAND = 107175140535005
+local BEAM_MATCH_DIST = 3
+local DIG_RETRIES = 3
+local SPOT_WAIT = 5
+local BEAM_SETTLE = 2
+local MIN_DIG_DELAY = 2.05
 
-local function v5(v6)
-    if v6.Name ~= "ErrorPrompt" then return end
+local RS = game:GetService("ReplicatedStorage")
+local LP = game:GetService("Players").LocalPlayer
+local TP = game:GetService("TeleportService")
+local UIS = game:GetService("UserInputService")
 
-    local v7, v8, v9 = pcall(function()
-        return v6.TitleFrame.ErrorTitle.Text,
-            v6.MessageArea.ErrorFrame.ErrorMessage.Text
+if not game:IsLoaded() then game.Loaded:Wait() end
+LP:WaitForChild("PlayerGui")
+if not LP.Character then LP.CharacterAdded:Wait() end
+
+local function setupStatusUI()
+    local parent = pcall(gethui) and gethui() or game:GetService("CoreGui") or LP:WaitForChild("PlayerGui")
+    local old = parent:FindFirstChild("FarmStatusPill")
+    if old then old:Destroy() end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "FarmStatusPill"
+    gui.ResetOnSpawn = false
+    gui.DisplayOrder = 10000
+
+    local pill = Instance.new("Frame")
+    pill.Name = "Pill"
+    pill.AnchorPoint = Vector2.new(0.5, 0)
+    pill.Position = UDim2.new(0.5, 0, 0, 18)
+    pill.Size = UDim2.new(0, 380, 0, 32)
+    pill.BackgroundColor3 = Color3.fromRGB(15, 20, 28)
+    pill.BackgroundTransparency = 0.28
+    pill.BorderSizePixel = 0
+    pill.ClipsDescendants = true
+    pill.Parent = gui
+
+    local corner = Instance.new("UICorner", pill)
+    corner.CornerRadius = UDim.new(1, 0)
+
+    local stroke = Instance.new("UIStroke", pill)
+    stroke.Color = Color3.fromRGB(80, 120, 200)
+    stroke.Transparency = 0.35
+    stroke.Thickness = 1.6
+
+    local dot = Instance.new("Frame", pill)
+    dot.Name = "Dot"
+    dot.AnchorPoint = Vector2.new(0, 0.5)
+    dot.Position = UDim2.new(0, 12, 0.5, 0)
+    dot.Size = UDim2.new(0, 10, 0, 10)
+    dot.BackgroundColor3 = Color3.fromRGB(56, 130, 255)
+    dot.BorderSizePixel = 0
+
+    local dotCorner = Instance.new("UICorner", dot)
+    dotCorner.CornerRadius = UDim.new(1, 0)
+
+    local label = Instance.new("TextLabel", pill)
+    label.Name = "StatusText"
+    label.AnchorPoint = Vector2.new(0, 0.5)
+    label.Position = UDim2.new(0, 30, 0.5, 0)
+    label.Size = UDim2.new(1, -40, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.GothamMedium
+    label.TextSize = 13
+    label.TextColor3 = Color3.fromRGB(240, 240, 240)
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Text = "Gold Farm | Khoi tao..."
+    label.TextTruncate = Enum.TextTruncate.AtEnd
+
+    local dragging, dragStart, startPos
+    pill.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = pill.Position
+        end
     end)
-    if not v7 then return end
+    pill.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UIS.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            pill.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
 
-    if v8 == "Teleport Failed" then
-        task.wait(2)
-        v4()
-    elseif string.find(v9, "Unable to join game") or string.find(v9, "Disconnected") then
-        task.wait(2)
-        v4()
+    gui.Parent = parent
+
+    return function(text, color)
+        label.Text = text
+        if color then dot.BackgroundColor3 = color end
     end
 end
 
-pcall(function()
-    v3.RobloxPromptGui.promptOverlay.ChildAdded:Connect(v5)
-end)
+local updateStatus = setupStatusUI()
 
-local function v10()
-    local v11, v12 = pcall(function()
-        return v1.PlayerGui["[WGC Integration] FTUE"].Frame.Frame.Border["@CONTENT"]["@COUNT"].Text
-    end)
-    if not v11 then return end
-    local v13, v14 = v12:match("(%d+)%s*/%s*(%d+)")
-    return tonumber(v13), tonumber(v14)
+local function moveTo(cf)
+    (LP.Character or LP.CharacterAdded:Wait()):PivotTo(cf)
 end
 
-local function v15()
-    local v16, v17 = pcall(function()
-        return v1.PlayerGui["Gold Hunters HUD (example)"]["WGC Info Button Slot"]["[WGC Integration] FTUE Button"].BUTTON
+local function goTo(placeId)
+    local id = tonumber(placeId)
+    if not id then return end
+    updateStatus("Teleport | Chuyen sang " .. tostring(id) .. "...", Color3.fromRGB(180, 100, 255))
+    TP:Teleport(id)
+end
+
+local function readGold(name)
+    local ok, val = pcall(function()
+        local c = LP.PlayerGui.HUD.GoldCounters[name].Counter
+        return tonumber((tostring(c:IsA("ValueBase") and c.Value or c.Text):gsub("%D", "")))
     end)
-    if v16 and v17:IsA("ImageButton") then
-        for _, v18 in ipairs(getconnections(v17.Activated)) do v18:Fire() end
+    return (ok and val) and math.max(0, val) or 0
+end
+
+local function smelt()
+    updateStatus("Island | Tim kiem lo nau quang...", Color3.fromRGB(240, 180, 50))
+    local smelter = workspace:WaitForChild("Interactable", 30):WaitForChild("Smelter", 30):WaitForChild("Attachment", 30)
+    local prompt = smelter:WaitForChild("@PROMPT", 30)
+    prompt.MaxActivationDistance = math.huge
+    prompt.RequiresLineOfSight = false
+
+    local ore0 = readGold("GoldOreCounter")
+    local bar0 = readGold("GoldBarCounter")
+
+    if ore0 <= 0 then
+        updateStatus("Island | Khong co quang, quay ve bãi farm...", Color3.fromRGB(255, 100, 100))
+        return goTo(_G.FarmPlaceId)
+    end
+
+    local t0 = os.clock()
+    repeat
+        fireproximityprompt(prompt)
+        updateStatus(string.format("Island | Cho quang vao lo... (Con %d ore)", readGold("GoldOreCounter")), Color3.fromRGB(255, 140, 50))
+        task.wait(0.3)
+    until readGold("GoldOreCounter") <= 0 or os.clock() - t0 > 20
+
+    updateStatus(string.format("Island | Dang nau thoi vang... (Hien co: %d)", bar0), Color3.fromRGB(255, 200, 50))
+    t0 = os.clock()
+    repeat
         task.wait(0.5)
-    end
-end
+    until readGold("GoldBarCounter") > bar0 or os.clock() - t0 > 25
 
-local function v19()
-    local v20, v21 = v10()
-    if not v20 then
-        v15()
-        v20, v21 = v10()
-    end
-    return v20, v21
-end
-
-local function v22()
-    local v23, v24 = v19()
-    return v23 ~= nil and v23 >= v24
-end
-
-local function v25()
-    v2:Teleport(107175140535005)
-end
-
-local function v26()
-    local v27 = tonumber(_G.FarmPlaceId)
-    if not v27 then
-        warn("_G.FarmPlaceId is not set")
-        return
-    end
-    v2:Teleport(v27)
-end
-
-local function v28(v29)
-    local v30 = v1.Character or v1.CharacterAdded:Wait()
-    v30:PivotTo(v29)
-end
-
-local function v31(v32)
-    local v33, v34 = pcall(function()
-        local v35 = v1.PlayerGui.HUD.GoldCounters[v32].Counter
-        local v36 = v35:IsA("ValueBase") and v35.Value or v35.Text
-        return tonumber((tostring(v36):gsub("[^%d]", ""))) or 0
-    end)
-    return v33 and v34 or 0
-end
-
-local function v37()
-    local v38 = workspace:WaitForChild("Interactable")
-        :WaitForChild("Smelter")
-        :WaitForChild("Attachment")
-        :WaitForChild("@PROMPT")
-    v38.MaxActivationDistance = math.huge
-    v38.RequiresLineOfSight = false
-
-    local v39 = v31("GoldOreCounter")
-    local v40 = v31("GoldBarCounter")
-
-    if v39 <= 0 then return v26() end
-
-    local v41 = os.clock() + 15
-    repeat
-        fireproximityprompt(v38)
-        task.wait(0.2)
-    until v31("GoldOreCounter") < v39 or os.clock() >= v41
-
-    v41 = os.clock() + 15
-    repeat
-        task.wait(0.2)
-    until v31("GoldBarCounter") > v40 or os.clock() >= v41
-
-    if v31("GoldBarCounter") > v40 then
-        v26()
-    end
-end
-
-local function v42()
-    local v43 = v1.Character and v1.Character:FindFirstChild("HumanoidRootPart")
-    if not v43 then return end
-    local v44, v45
-    for _, v46 in ipairs(workspace:GetDescendants()) do
-        if v46:IsA("ProximityPrompt") and v46.ActionText == "Scan for Gold Ore" and v46.Enabled then
-            local v47 = v46.Parent
-            local v48 = v47:IsA("Attachment") and v47.WorldPosition or v47:IsA("BasePart") and v47.Position
-            local v49 = v48 and (v48 - v43.Position).Magnitude
-            if v49 and (not v45 or v49 < v45) then v44, v45 = v46, v49 end
-        end
-    end
-    return v44
-end
-
-local function v50()
-    v15()
-    if v22() then return v25() end
-
-    local v51 = v42()
-    if not v51 then return end
-
-    local v52 = {}
-    local v53 = workspace.DescendantAdded:Connect(function(v54)
-        if v54:IsA("Model") and v54.Name == "Location Beam" then
-            table.insert(v52, v54:GetPivot())
-        end
-    end)
-    fireproximityprompt(v51)
+    updateStatus(string.format("Island | Nau xong (+%d thoi)! Ve Farm...", math.max(0, readGold("GoldBarCounter") - bar0)), Color3.fromRGB(60, 220, 100))
     task.wait(1)
-    v53:Disconnect()
-
-    local v55 = true
-    task.spawn(function()
-        while v55 and task.wait(0.1) do
-            local v56 = workspace:FindFirstChild("Dig Spot")
-            local v57 = v56 and v56:FindFirstChild("ProximityPrompt", true)
-            if v57 then fireproximityprompt(v57) end
-        end
-    end)
-
-    for _, v58 in ipairs(v52) do
-        if v22() then break end
-
-        local v59 = v10() or 0
-        v28(v58)
-
-        local v60 = os.clock() + 5
-        repeat
-            task.wait(0.1)
-        until (v10() or 0) > v59 or os.clock() >= v60
-    end
-
-    v55 = false
-    if v22() then v25() end
+    goTo(_G.FarmPlaceId)
 end
 
-if game.PlaceId == 107175140535005 then
-    v37()
+local function farm()
+    local WGC = RS:WaitForChild("WGC", 30)
+    local Networking = require(WGC.Networking)
+    local EconomyConfig = require(WGC.EconomyConfig)
+
+    local function nearestScanPrompt()
+        local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        local best, bestDist
+        for _, d in ipairs(workspace:GetDescendants()) do
+            if d:IsA("ProximityPrompt") and d.ActionText == "Scan for Gold Ore" and d.Enabled then
+                local p = d.Parent
+                local pos = p:IsA("Attachment") and p.WorldPosition or p:IsA("BasePart") and p.Position
+                if pos then
+                    local dist = (pos - root.Position).Magnitude
+                    if not bestDist or dist < bestDist then
+                        best, bestDist = d, dist
+                    end
+                end
+            end
+        end
+        return best
+    end
+
+    local function findSpotAt(beamPos)
+        for _, m in ipairs(workspace:GetChildren()) do
+            if m.Name == "Dig Spot" and m:IsA("Model") and (m:GetPivot().Position - beamPos).Magnitude <= BEAM_MATCH_DIST then
+                return m
+            end
+        end
+        return nil
+    end
+
+    local function addBeamUnique(list, cf)
+        for _, existing in ipairs(list) do
+            if (existing.Position - cf.Position).Magnitude < 1 then
+                return
+            end
+        end
+        table.insert(list, cf)
+    end
+
+    local function scanForBeams()
+        updateStatus("Farm | Tim tram quet quang...", Color3.fromRGB(60, 140, 255))
+        local prompt = nearestScanPrompt()
+        if not prompt then return {} end
+
+        local beams = {}
+        local conn = workspace.DescendantAdded:Connect(function(x)
+            if x:IsA("Model") and x.Name == "Location Beam" then
+                task.defer(function()
+                    if x.Parent then addBeamUnique(beams, x:GetPivot()) end
+                end)
+            end
+        end)
+
+        updateStatus("Farm | Dang kich hoat quet tia...", Color3.fromRGB(240, 180, 50))
+        local t0 = os.clock()
+        repeat
+            fireproximityprompt(prompt)
+            task.wait(0.2)
+        until #beams > 0 or os.clock() - t0 > 10
+
+        task.wait(BEAM_SETTLE)
+
+        for _, m in ipairs(workspace:GetChildren()) do
+            if m.Name == "Location Beam" and m:IsA("Model") then
+                addBeamUnique(beams, m:GetPivot())
+            end
+        end
+
+        conn:Disconnect()
+        updateStatus(string.format("Farm | Tim thay %d tia quang!", #beams), Color3.fromRGB(60, 200, 255))
+        return beams
+    end
+
+    local count = 0
+    local maxCount = nil
+    local lastDigTime = 0
+
+    local function digAt(pos)
+        local elapsed = os.clock() - lastDigTime
+        if elapsed < MIN_DIG_DELAY then
+            updateStatus(string.format("Farm | Cho cooldown server (%.1fs)...", MIN_DIG_DELAY - elapsed), Color3.fromRGB(200, 200, 100))
+            task.wait(MIN_DIG_DELAY - elapsed)
+        end
+
+        for attempt = 1, DIG_RETRIES do
+            updateStatus(string.format("Farm | Dang dao quang... (%d/%s)", count, tostring(maxCount or "?")), Color3.fromRGB(56, 130, 255))
+            local ok, newCount, level = pcall(function()
+                return Networking.C_Dig:InvokeServer(pos)
+            end)
+
+            if ok and type(newCount) == "number" and type(level) == "number" then
+                lastDigTime = os.clock()
+                return newCount, level
+            end
+
+            if attempt < DIG_RETRIES then
+                task.wait(MIN_DIG_DELAY)
+            end
+        end
+        return nil
+    end
+
+    while not maxCount or count < maxCount do
+        local beams = scanForBeams()
+        if #beams == 0 then
+            updateStatus("Farm | Khong tim thay tia, thu lai sau 2s...", Color3.fromRGB(255, 140, 50))
+            task.wait(2)
+        else
+            for idx, cf in ipairs(beams) do
+                if maxCount and count >= maxCount then break end
+                updateStatus(string.format("Farm | Toi spot %d/%d (Tui: %d/%s)", idx, #beams, count, tostring(maxCount or "?")), Color3.fromRGB(100, 180, 255))
+                moveTo(cf)
+
+                local spot
+                local s0 = os.clock()
+                repeat
+                    task.wait(0.1)
+                    spot = findSpotAt(cf.Position)
+                until spot or os.clock() - s0 > SPOT_WAIT
+
+                if spot then
+                    moveTo(spot:GetPivot())
+                    local newCount, level = digAt(spot:GetPivot().Position)
+                    if newCount then
+                        count = newCount
+                        maxCount = EconomyConfig.GetLevel(level).InventorySize
+                        updateStatus(string.format("Farm | Dao thanh cong! (%d/%d)", count, maxCount), Color3.fromRGB(50, 220, 120))
+                    end
+                end
+            end
+        end
+    end
+
+    updateStatus("Farm | Day kho! Chuan bi sang Island nau vang...", Color3.fromRGB(255, 100, 220))
+    task.wait(1)
+    goTo(ISLAND)
+end
+
+if game.PlaceId == ISLAND then
+    smelt()
 else
-    v50()
+    farm()
 end
